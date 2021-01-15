@@ -27,18 +27,19 @@ struct Problem {
     constraints: Vec<Constraint>
 }
 
-#[derive(Debug)]
-enum TypeVariable {
+#[derive(Debug, Copy, Clone)]
+enum TypeVariable { // definir l'id directement ici : Objective(id)
     Objective,
     Slack,
     Excess,
     Artificial
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 struct Variable {
     name: TypeVariable,
-    id: usize
+    id_all: usize, // reference var in all type of var
+    id: usize // reference var in its type
     // second name pour donner un vrai nom ?
 }
 
@@ -47,6 +48,7 @@ impl Problem {
         // if pb::opti == min : * - 1
         // for each constraint, if rhx < 0 : * - 1
         // add s1 si <=, = ou >= -s1 + a1
+        /// ligne du pivot divisee par par le pivot
 
         // base Xb : non nulles, à regarder à la fin pour la solution : partie colonne gauche tableau
         // hors base X_n : nulles, 0 à la fin
@@ -69,16 +71,16 @@ impl Problem {
 
         let mut all_vars: Vec<Variable> = vec![];
         for i in 0..nb_vars {
-            all_vars.push(Variable{name: TypeVariable::Objective, id: i})
+            all_vars.push(Variable{name: TypeVariable::Objective, id_all: i, id: i})
         } 
         for i in 0..nb_slacks {
-            all_vars.push(Variable{name: TypeVariable::Slack, id: i})
+            all_vars.push(Variable{name: TypeVariable::Slack, id_all: i + nb_vars, id: i})
         } 
         println!("all_vars : {:?}", all_vars);
 
         let mut x_base: Vec<Variable> = vec![];
         for i in 0..nb_constraints {
-            x_base.push(Variable{name: TypeVariable::Slack, id: i}) // attention apres ce sera pas tout le temps une slack
+            x_base.push(Variable{name: TypeVariable::Slack, id_all: i + nb_vars, id: i}) // attention apres ce sera pas tout le temps une slack
         } 
         println!("xBase : {:?}", x_base);
 
@@ -87,14 +89,14 @@ impl Problem {
             b_vector.push(self.constraints[i].b);
         }
         println!("bVector : {:?}", b_vector);
-
-        self.simplex(&all_vars, &z_objective, &x_base, &b_vector, nb_constraints);
+        // z_objective[4] = 10.;
+        self.simplex(&all_vars, &mut z_objective, &mut x_base, &mut b_vector, nb_constraints);
 
         30
     }
 
-    fn simplex(&self, all_vars: &Vec<Variable>, z_objective: &Vec<f32>, x_base: &Vec<Variable>, b_vector: &Vec<f32>, nb_constraints: usize) {
-        println!("Starting simplex");
+    fn simplex(&self, all_vars: &Vec<Variable>, z_objective: &mut Vec<f32>, x_base: &mut Vec<Variable>, b_vector: &mut Vec<f32>, nb_constraints: usize) {
+        println!("STARTING SIMPLEX");
 
         println!("all_vars : {:?}", all_vars);
         println!("z_objective : {:?}", z_objective);
@@ -124,25 +126,92 @@ impl Problem {
         }
         println!("constraints {:?}", constraints);
 
-
-        let max_iterations = 5;
+        // ligne du pivot divisee par le pivot
+        let max_iterations = 4;
         let mut current_iteration = 0;
         let mut objective = 0.0;
         while current_iteration < max_iterations {
             current_iteration += 1;
-            println!("{:?}", current_iteration);
+            println!("CURRENT ITERATION {:?}", current_iteration);
+            println!("z_objective {:?}", z_objective);
+
             if let Some(entering_base) = argMax(&z_objective, &all_vars) {
                 println!("entering_base {:?}", entering_base);
-                let x_pivot = entering_base.id;
+                let x_pivot = entering_base.id_all;
                 println!("x_pivot {:?}", x_pivot);
+                let b_divided: Vec<f32> = b_vector.iter().enumerate()
+                    .map(|(index, x)| {
+                        // todo par forcement besoin de faire cette verif a ce moment pour perfs
+                        match constraints[index][x_pivot] {
+                            0.0 => - 1.0,
+                            val => x / val
+                        }
+                    }).collect();
+                println!("b_divided {:?}", b_divided);
+                let y_pivot = argMin(&b_divided);
+                println!("y_pivot {:?}", y_pivot);
+                let pivot = constraints[y_pivot][x_pivot];
+                println!("pivot {:?}", pivot);
+                
+                // Starting update tableau
+                // todo : pas besoin de mut ici vu que overwrite a literation suivante
+                let mut z_objective_clone = z_objective.clone();
+                let mut b_vector_clone = b_vector.clone();
+                let mut constraints_clone = constraints.clone();
+                objective = objective - (z_objective[x_pivot] * b_vector[y_pivot]) / pivot;
+                println!("NEW objective {:?}", objective);
+                *z_objective = z_objective_clone.iter().enumerate()
+                    .map(|(index, x)| x - (z_objective_clone[x_pivot] * constraints_clone[y_pivot][index]) / pivot).collect::<Vec<f32>>();
+                println!("NEW z_objective {:?}", z_objective);
 
+                *b_vector = b_vector_clone.iter().enumerate()
+                    .map(|(index, x)| {
+                        match index {
+                            line_pivot if line_pivot == y_pivot => x / pivot,
+                            _ => x - (constraints_clone[index][x_pivot] * b_vector_clone[y_pivot]) / pivot
+                        }
+                    }).collect::<Vec<f32>>();
+                println!("NEW b_vector {:?}", b_vector);
+
+                constraints = constraints_clone.iter().enumerate()
+                    .map(|(index_row, row)| row.iter().enumerate()
+                    .map(|(index_val, val)| {
+                        match index_row {
+                            line_pivot if line_pivot == y_pivot => val / pivot,
+                            _ => val - (constraints_clone[index_row][x_pivot] * constraints_clone[y_pivot][index_val])
+                        }
+                    })
+                    .collect::<Vec<f32>>())
+                    .collect::<Vec<Vec<f32>>>();
+                
+                // updating base :
+                x_base[y_pivot] = entering_base;
+                println!("NEW x_base {:?}", x_base);
+
+                println!("NEW constraints {:?}", constraints);
+
+
+            } else {
+                println!("Algo done");
+                println!("Objective value : {}", - objective);
+                println!("Variable value :");
+                for (index, base) in x_base.iter().enumerate() {
+                    let name_var = match base.name {
+                        TypeVariable::Objective => 'x',
+                        TypeVariable::Slack => 's',
+                        TypeVariable::Excess => 'e',
+                        TypeVariable::Artificial => 'a' 
+                    };
+                    println!("Variable {}{} = {}", name_var, base.id, b_vector[index]);
+
+                }
             }
         }
 
     }
 }
 
-fn argMax<'a>(vector: &Vec<f32>, all_vars: &'a Vec<Variable>) -> Option<&'a Variable> {
+fn argMax(vector: &Vec<f32>, all_vars: &Vec<Variable>) -> Option<Variable> {
     let mut max = 0.0;
     let mut index_max = 0;
     for i in 0..vector.len() {
@@ -155,7 +224,19 @@ fn argMax<'a>(vector: &Vec<f32>, all_vars: &'a Vec<Variable>) -> Option<&'a Vari
     if max == 0.0 {
         return None
     }
-    Some(&all_vars[index_max])
+    Some(all_vars[index_max])
+}
+
+fn argMin(vector: &Vec<f32>) -> usize { // no optimal solutions if no positive entry ?
+    let mut min = 1_000_000_000.0;
+    let mut index_min = 0;
+    for i in 0..vector.len() {
+        if vector[i] < min && vector[i] > 0.0 {
+            index_min = i;
+            min = vector[i];
+        }
+    }
+    index_min
 }
 // TODO : METTRE CODE DANS UN CONFIG TEST
 // attention quand * - 1 les variables coefficients, voir s'il faut aussi le faire sur - M
@@ -175,6 +256,7 @@ fn main() {
     };
     println!("{:?}", g);
     println!("{:?}", g.solve());
+
 
     // let n = 1_000_000;
     // let mut v: Vec<i32> = Vec::with_capacity(n); 
