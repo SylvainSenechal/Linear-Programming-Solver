@@ -1,3 +1,4 @@
+use std::fmt;
 // const 'static i32 M = 100_000;
 
 #[derive(Debug)]
@@ -27,15 +28,15 @@ struct Problem {
     constraints: Vec<Constraint>
 }
 
-#[derive(Debug, Copy, Clone)]
-enum TypeVariable { // definir l'id directement ici : Objective(id)
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum TypeVariable { // todo definir l'id directement ici : Objective(id)
     Objective,
     Slack,
     Excess,
     Artificial
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 struct Variable {
     name: TypeVariable,
     id_all: usize, // reference var in all type of var
@@ -43,17 +44,37 @@ struct Variable {
     // second name pour donner un vrai nom ?
 }
 
+#[derive(Debug, PartialEq)]
+struct Solution {
+    objective: f32,
+    variables: Vec<Variable>,
+    variables_values: Vec<f32>
+}
+
+impl fmt::Display for Solution {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Solution :\n")?;
+        for (index, var) in self.variables.iter().enumerate() {
+            if var.name == TypeVariable::Objective {
+                write!(f, "Var x{} = {}\n", var.id, self.variables_values[index])?;
+            }
+        }
+        write!(f, "Objective value : {}", self.objective)?;
+        Ok(())
+    }
+}
+
 impl Problem {
-    fn solve(&self) -> i32 { // Split le debut de cette fonction dans une compile function ?
+    fn solve(&self) -> Option<Solution> { // Split le debut de cette fonction dans une compile function ?
         // if pb::opti == min : * - 1
         // for each constraint, if rhx < 0 : * - 1
-        // add s1 si <=, = ou >= -s1 + a1
+        // add s1 si <=, = ou >= -s1 + a1 !! pas de - si si contrainte = de base a reverifier
         /// ligne du pivot divisee par par le pivot
 
         // base Xb : non nulles, à regarder à la fin pour la solution : partie colonne gauche tableau
         // hors base X_n : nulles, 0 à la fin
         let nb_constraints = self.constraints.len();
-        let nb_slacks = self.constraints.len();
+        let nb_slacks = self.constraints.len(); // !! TODO PAS VRAI SI DES CONTRAINTES EGALES DEJA PRESENTES AVANT MISE EN FORME STANDARD
         let nb_vars = self.objective_coefficients.len();
         println!("nbSlacks : {:?}", nb_slacks);
         println!("nbVars : {:?}", nb_vars);
@@ -90,12 +111,12 @@ impl Problem {
         }
         println!("bVector : {:?}", b_vector);
         // z_objective[4] = 10.;
-        self.simplex(&all_vars, &mut z_objective, &mut x_base, &mut b_vector, nb_constraints);
+        let solution = self.simplex(&all_vars, &mut z_objective, &mut x_base, &mut b_vector, nb_constraints);
 
-        30
+        solution
     }
 
-    fn simplex(&self, all_vars: &Vec<Variable>, z_objective: &mut Vec<f32>, x_base: &mut Vec<Variable>, b_vector: &mut Vec<f32>, nb_constraints: usize) {
+    fn simplex(&self, all_vars: &Vec<Variable>, z_objective: &mut Vec<f32>, x_base: &mut Vec<Variable>, b_vector: &mut Vec<f32>, nb_constraints: usize) -> Option<Solution> {
         println!("STARTING SIMPLEX");
 
         println!("all_vars : {:?}", all_vars);
@@ -127,15 +148,19 @@ impl Problem {
         println!("constraints {:?}", constraints);
 
         // ligne du pivot divisee par le pivot
-        let max_iterations = 4;
+        let max_iterations = 15;
         let mut current_iteration = 0;
         let mut objective = 0.0;
-        while current_iteration < max_iterations {
+        // while current_iteration < max_iterations {
+        let solution = loop {
+            if current_iteration == max_iterations {
+                break None
+            }
             current_iteration += 1;
             println!("CURRENT ITERATION {:?}", current_iteration);
             println!("z_objective {:?}", z_objective);
 
-            if let Some(entering_base) = argMax(&z_objective, &all_vars) {
+            if let Some(entering_base) = arg_max(&z_objective, &all_vars) {
                 println!("entering_base {:?}", entering_base);
                 let x_pivot = entering_base.id_all;
                 println!("x_pivot {:?}", x_pivot);
@@ -148,7 +173,7 @@ impl Problem {
                         }
                     }).collect();
                 println!("b_divided {:?}", b_divided);
-                let y_pivot = argMin(&b_divided);
+                let y_pivot = arg_min(&b_divided);
                 println!("y_pivot {:?}", y_pivot);
                 let pivot = constraints[y_pivot][x_pivot];
                 println!("pivot {:?}", pivot);
@@ -195,23 +220,29 @@ impl Problem {
                 println!("Algo done");
                 println!("Objective value : {}", - objective);
                 println!("Variable value :");
+                let mut variables_solution = vec![];
+                let mut variables_values = vec![];
                 for (index, base) in x_base.iter().enumerate() {
                     let name_var = match base.name {
-                        TypeVariable::Objective => 'x',
+                        TypeVariable::Objective => {
+                            variables_solution.push(*base);
+                            variables_values.push(b_vector[index]);
+                            'x'
+                        },
                         TypeVariable::Slack => 's',
                         TypeVariable::Excess => 'e',
                         TypeVariable::Artificial => 'a' 
                     };
                     println!("Variable {}{} = {}", name_var, base.id, b_vector[index]);
-
-                }
+                }                
+                break Some(Solution{objective: - objective, variables: variables_solution, variables_values: variables_values})
             }
-        }
-
+        };
+        solution
     }
 }
 
-fn argMax(vector: &Vec<f32>, all_vars: &Vec<Variable>) -> Option<Variable> {
+fn arg_max(vector: &Vec<f32>, all_vars: &Vec<Variable>) -> Option<Variable> {
     let mut max = 0.0;
     let mut index_max = 0;
     for i in 0..vector.len() {
@@ -227,7 +258,7 @@ fn argMax(vector: &Vec<f32>, all_vars: &Vec<Variable>) -> Option<Variable> {
     Some(all_vars[index_max])
 }
 
-fn argMin(vector: &Vec<f32>) -> usize { // no optimal solutions if no positive entry ?
+fn arg_min(vector: &Vec<f32>) -> usize { // no optimal solutions if no positive entry ?
     let mut min = 1_000_000_000.0;
     let mut index_min = 0;
     for i in 0..vector.len() {
@@ -239,30 +270,76 @@ fn argMin(vector: &Vec<f32>) -> usize { // no optimal solutions if no positive e
     index_min
 }
 // TODO : METTRE CODE DANS UN CONFIG TEST
+// TODO add timer 
 // attention quand * - 1 les variables coefficients, voir s'il faut aussi le faire sur - M
-fn main() {
-    let a = TypeInequality::Inf;
-    let b = TypeInequality::Inf;
-    let c = TypeInequality::Inf;
+fn main() -> Result<(), std::io::Error> { // todo add proper Result
 
-    let d = Constraint{inequality: a, coefficients: vec![2.0,1.0], b: 8.0};
-    let e = Constraint{inequality: b, coefficients: vec![1.0,2.0], b: 7.0};
-    let f = Constraint{inequality: c, coefficients: vec![0.0, 1.0], b: 3.0};
+    let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![10.0, 11.0], b: 10700.0};
+    let c2 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![1.0, 2.0], b: 1000.0};
+    let c3 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 0.0], b: 700.0};
 
-    let g = Problem{
+    let problem = Problem {
         optimization: Optimization::Maximization,
-        objective_coefficients: vec![4.0,5.0],
-        constraints: vec![d, e, f]
+        objective_coefficients: vec![56.0, 42.0],
+        constraints: vec![c1, c2, c3]
     };
-    println!("{:?}", g);
-    println!("{:?}", g.solve());
 
+    let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+    println!("{}", solution);
 
-    // let n = 1_000_000;
-    // let mut v: Vec<i32> = Vec::with_capacity(n); 
-    // for i in 0..n {
-    //     v.push(i as i32);
-    // }
-    // println!("{:?}", v);
-    println!("Hello, world!");
+    Ok(())
+}
+
+// todo : retravailler l'ordre des variables pour la comparaison
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maxi_full_inf_positive_b_solution_exists() {
+        let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![2.0, 1.0], b: 8.0};
+        let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 2.0], b: 7.0};
+        let c3 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![0.0, 1.0], b: 3.0};
+    
+        let problem = Problem {
+            optimization: Optimization::Maximization,
+            objective_coefficients: vec![4.0, 5.0],
+            constraints: vec![c1, c2, c3]
+        };
+
+        let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+        let target = Solution {
+            objective: 22.0,
+            variables: vec![
+                Variable{name: TypeVariable::Objective, id_all: 0, id: 0},
+                Variable{name: TypeVariable::Objective, id_all: 1, id: 1},
+            ],
+            variables_values: vec![3.0, 2.0]
+        };
+        assert_eq!(target, solution);
+    }
+
+    #[test]
+    fn maxi_mixed_infsup_positive_b_solution_exists() {
+        let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![10.0, 11.0], b: 10700.0};
+        let c2 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![1.0, 2.0], b: 1000.0};
+        let c3 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 0.0], b: 700.0};
+    
+        let problem = Problem {
+            optimization: Optimization::Maximization,
+            objective_coefficients: vec![56.0, 42.0],
+            constraints: vec![c1, c2, c3]
+        };
+
+        let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+        let target = Solution {
+            objective: 46200.0,
+            variables: vec![
+                Variable{name: TypeVariable::Objective, id_all: 0, id: 0},
+                Variable{name: TypeVariable::Objective, id_all: 1, id: 1},
+            ],
+            variables_values: vec![300.0, 700.0]
+        };
+        assert_eq!(target, solution);
+    }
 }
