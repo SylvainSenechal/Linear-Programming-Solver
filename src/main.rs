@@ -3,7 +3,7 @@ const BIG_M: f64 = 1_000_000_000.0; // We are using simplex with BigM method (us
 const MAX_ITERATION: i32 = 15; // Avoiding Hell 
 const EPSILON: f64 = 0.0001; // Comparing the value of 2 variables (we lose precision even with f64)
 
-// TODO : unbounded solution tests, degeneracy 
+// TODO : unbounded / infeasible, tests  
 
 #[derive(Debug)]
 enum Optimization {
@@ -44,7 +44,6 @@ enum TypeVariable { // todo definir l'id directement ici : Objective(id)
 struct Variable {
     type_var: TypeVariable,
     id: usize, // reference variable among all type of var
-    id_constraint: usize // tell the programme from which constraint the variable is coming from 
     // todo ajouter un vrai nom ?
     // todo incorporer valeur dedans direction, initialser à None puis en résultat à Some(f64) ?
 }
@@ -114,11 +113,12 @@ impl Problem {
         }
 
         for i in 0..nb_vars {
-            all_vars.push(Variable{type_var: TypeVariable::Objective, id: i, id_constraint: 0}) // todo deal with id_constraint useless here
+            all_vars.push(Variable{type_var: TypeVariable::Objective, id: i}) // todo deal with id_constraint useless here
         }
 
         let mut current_id_var = nb_vars; // Unique reference to any var
-        for (id_constraint, constraint) in self.constraints.iter_mut().enumerate() {
+        let mut ref_var_id: Vec<usize> = vec![];
+        for constraint in self.constraints.iter_mut() {
             // Dealing with negative b member cf #2
             let multiplier = if constraint.b >= 0.0 {1.0} else {- 1.0};
             b_vector.push(constraint.b * multiplier);
@@ -137,51 +137,64 @@ impl Problem {
             // Building a feasible base and creating the differents variables used in the tableau cf #3
             match constraint.inequality {
                 TypeInequality::Inf => {
-                    x_base.push(Variable{type_var: TypeVariable::Slack, id: current_id_var, id_constraint: id_constraint});
-                    all_vars.push(Variable{type_var: TypeVariable::Slack, id: current_id_var, id_constraint: id_constraint});
+                    x_base.push(Variable{type_var: TypeVariable::Slack, id: current_id_var});
+                    all_vars.push(Variable{type_var: TypeVariable::Slack, id: current_id_var});
+                    ref_var_id.push(current_id_var);
                     current_id_var += 1;
                 },
                 TypeInequality::Sup => {
-                    all_vars.push(Variable{type_var: TypeVariable::Excess, id: current_id_var, id_constraint: id_constraint});
+                    all_vars.push(Variable{type_var: TypeVariable::Excess, id: current_id_var});
+                    ref_var_id.push(current_id_var);
+                    ref_var_id.push(current_id_var);
                     current_id_var += 1;
-                    x_base.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var, id_constraint: id_constraint});
-                    all_vars.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var, id_constraint: id_constraint});
+                    x_base.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var});
+                    all_vars.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var});
                     current_id_var += 1;
                 },
                 TypeInequality::Eq => {
-                    x_base.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var, id_constraint: id_constraint});
-                    all_vars.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var, id_constraint: id_constraint});
+                    x_base.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var});
+                    all_vars.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var});
+                    ref_var_id.push(current_id_var);
                     current_id_var += 1;
                 }
             }
         }
-
+        println!("{:?}", ref_var_id);
         for _ in 0..(all_vars.len() - nb_vars) { // Filling the end of z_objective withs zeros representing the non Objective variable
             z_objective.push(0.0);
         }
  
         // Building the simplex's tableau cf #5
-        for (id, constraint) in self.constraints.iter().enumerate() {
+        let mut nb_inf = 0;
+        let mut nb_sup = 0;
+        let mut nb_eq = 0;
+        for constraint in self.constraints.iter() {
             let mut row: Vec<f64> = Vec::with_capacity(z_objective.len());
+
             for var in all_vars.iter() {
                 match constraint.inequality {
                     TypeInequality::Inf => match var.type_var {
                         TypeVariable::Objective => row.push(constraint.coefficients[var.id]),
-                        TypeVariable::Slack if var.id_constraint == id => row.push(1.0),
+                        TypeVariable::Slack if var.id == (nb_vars + nb_inf + nb_eq + nb_sup * 2) => row.push(1.0),
                         _ => row.push(0.0)
                     },
                     TypeInequality::Sup => match var.type_var {
                         TypeVariable::Objective => row.push(constraint.coefficients[var.id]),
-                        TypeVariable::Excess if var.id_constraint == id => row.push(- 1.0),
-                        TypeVariable::Artificial if var.id_constraint == id => row.push(1.0),
+                        TypeVariable::Excess if var.id == (nb_vars + nb_inf + nb_eq + nb_sup * 2) => row.push(- 1.0),
+                        TypeVariable::Artificial if var.id == (nb_vars + nb_inf + nb_eq + nb_sup * 2 + 1) => row.push(1.0),
                         _ => row.push(0.0)
                     },
                     TypeInequality::Eq => match var.type_var {
                         TypeVariable::Objective => row.push(constraint.coefficients[var.id]),
-                        TypeVariable::Artificial if var.id_constraint == id => row.push(1.0),
+                        TypeVariable::Artificial if var.id == (nb_vars + nb_inf + nb_eq + nb_sup * 2) => row.push(1.0),
                         _ => row.push(0.0)
                     }
                 }
+            }
+            match constraint.inequality {
+                TypeInequality::Inf => nb_inf += 1,
+                TypeInequality::Sup => nb_sup += 1,
+                TypeInequality::Eq => nb_eq += 1
             }
             constraints.push(row);
         }
@@ -305,7 +318,7 @@ impl Problem {
     }
 }
 
-// These arg_max version might degenerate..
+// This arg_max version might degenerate..
 // fn arg_max(vector: &Vec<f64>, all_vars: &Vec<Variable>) -> Option<Variable> {
 //     let mut max = 0.0;
 //     let mut index_max = 0;
