@@ -1,5 +1,5 @@
 [package]
-name = "Linear-Programming-Solver"
+name = "linear-programming-solver"
 version = "0.1.0"
 authors = ["sylvain"]
 edition = "2018"
