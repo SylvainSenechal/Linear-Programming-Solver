@@ -1,6 +1,7 @@
 use std::fmt;
 const BIG_M: f64 = 1_000_000_000.0; // We are using simplex with BigM method (used when canonical base is not a feasible base)
 const MAX_ITERATION: i32 = 15; // Avoiding Hell 
+const EPSILON: f64 = 0.0001; // Comparing the value of 2 variables (we lose precision even with f64)
 
 #[derive(Debug)]
 enum Optimization {
@@ -45,11 +46,30 @@ struct Variable {
     // todo incorporer valeur dedans direction, initialser à None puis en résultat à Some(f64) ?
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct Solution {
     objective: f64,
     variables: Vec<Variable>,
     variables_values: Vec<f64>
+}
+
+impl PartialEq for Solution {
+    fn eq(&self, other: &Self) -> bool {
+        if self.objective != other.objective { // Objectives should be the same
+            return false
+        }
+        for (variable, value) in self.variables.iter().zip(self.variables_values.iter()) {           
+            let index_var = other.variables.iter().position(|x| x == variable);
+            if let Some(id) = index_var {
+                if (other.variables_values[id] - value).abs() > EPSILON { // 2 identicals variables should be assigned very close values
+                    return false
+                }
+            } else { // Variable in one solution needs to be found in the other
+                return false
+            }
+        }
+        true
+    }
 }
 
 impl fmt::Display for Solution {
