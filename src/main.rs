@@ -3,6 +3,8 @@ const BIG_M: f64 = 1_000_000_000.0; // We are using simplex with BigM method (us
 const MAX_ITERATION: i32 = 15; // Avoiding Hell 
 const EPSILON: f64 = 0.0001; // Comparing the value of 2 variables (we lose precision even with f64)
 
+// TODO : unbounded solution tests, degeneracy 
+
 #[derive(Debug)]
 enum Optimization {
     Maximization,
@@ -42,6 +44,7 @@ enum TypeVariable { // todo definir l'id directement ici : Objective(id)
 struct Variable {
     type_var: TypeVariable,
     id: usize, // reference variable among all type of var
+    id_constraint: usize // tell the programme from which constraint the variable is coming from 
     // todo ajouter un vrai nom ?
     // todo incorporer valeur dedans direction, initialser à None puis en résultat à Some(f64) ?
 }
@@ -55,7 +58,7 @@ struct Solution {
 
 impl PartialEq for Solution {
     fn eq(&self, other: &Self) -> bool {
-        if self.objective != other.objective { // Objectives should be the same
+        if (self.objective - other.objective).abs() > EPSILON { // Objectives should be assigned very close values
             return false
         }
         for (variable, value) in self.variables.iter().zip(self.variables_values.iter()) {           
@@ -111,11 +114,11 @@ impl Problem {
         }
 
         for i in 0..nb_vars {
-            all_vars.push(Variable{type_var: TypeVariable::Objective, id: i})
+            all_vars.push(Variable{type_var: TypeVariable::Objective, id: i, id_constraint: 0}) // todo deal with id_constraint useless here
         }
 
         let mut current_id_var = nb_vars; // Unique reference to any var
-        for constraint in self.constraints.iter_mut() {
+        for (id_constraint, constraint) in self.constraints.iter_mut().enumerate() {
             // Dealing with negative b member cf #2
             let multiplier = if constraint.b >= 0.0 {1.0} else {- 1.0};
             b_vector.push(constraint.b * multiplier);
@@ -134,20 +137,20 @@ impl Problem {
             // Building a feasible base and creating the differents variables used in the tableau cf #3
             match constraint.inequality {
                 TypeInequality::Inf => {
-                    x_base.push(Variable{type_var: TypeVariable::Slack, id: current_id_var});
-                    all_vars.push(Variable{type_var: TypeVariable::Slack, id: current_id_var});
+                    x_base.push(Variable{type_var: TypeVariable::Slack, id: current_id_var, id_constraint: id_constraint});
+                    all_vars.push(Variable{type_var: TypeVariable::Slack, id: current_id_var, id_constraint: id_constraint});
                     current_id_var += 1;
                 },
                 TypeInequality::Sup => {
-                    all_vars.push(Variable{type_var: TypeVariable::Excess, id: current_id_var});
+                    all_vars.push(Variable{type_var: TypeVariable::Excess, id: current_id_var, id_constraint: id_constraint});
                     current_id_var += 1;
-                    x_base.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var});
-                    all_vars.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var});
+                    x_base.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var, id_constraint: id_constraint});
+                    all_vars.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var, id_constraint: id_constraint});
                     current_id_var += 1;
                 },
                 TypeInequality::Eq => {
-                    x_base.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var});
-                    all_vars.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var});
+                    x_base.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var, id_constraint: id_constraint});
+                    all_vars.push(Variable{type_var: TypeVariable::Artificial, id: current_id_var, id_constraint: id_constraint});
                     current_id_var += 1;
                 }
             }
@@ -160,25 +163,23 @@ impl Problem {
         // Building the simplex's tableau cf #5
         for (id, constraint) in self.constraints.iter().enumerate() {
             let mut row: Vec<f64> = Vec::with_capacity(z_objective.len());
-            for var in &all_vars {
+            for var in all_vars.iter() {
                 match constraint.inequality {
-                    TypeInequality::Inf => {
-                        match var.type_var {
-                            TypeVariable::Objective => row.push(constraint.coefficients[var.id]),
-                            TypeVariable::Slack if var.id == id => row.push(1.0),
-                            _ => row.push(0.0),
-                        }
+                    TypeInequality::Inf => match var.type_var {
+                        TypeVariable::Objective => row.push(constraint.coefficients[var.id]),
+                        TypeVariable::Slack if var.id_constraint == id => row.push(1.0),
+                        _ => row.push(0.0)
                     },
                     TypeInequality::Sup => match var.type_var {
                         TypeVariable::Objective => row.push(constraint.coefficients[var.id]),
-                        TypeVariable::Excess if var.id == id => row.push(- 1.0),
-                        TypeVariable::Artificial if var.id == id => row.push(1.0),
-                        _ => row.push(0.0),
+                        TypeVariable::Excess if var.id_constraint == id => row.push(- 1.0),
+                        TypeVariable::Artificial if var.id_constraint == id => row.push(1.0),
+                        _ => row.push(0.0)
                     },
                     TypeInequality::Eq => match var.type_var {
                         TypeVariable::Objective => row.push(constraint.coefficients[var.id]),
-                        TypeVariable::Artificial if var.id == id => row.push(1.0),
-                        _ => row.push(0.0),
+                        TypeVariable::Artificial if var.id_constraint == id => row.push(1.0),
+                        _ => row.push(0.0)
                     }
                 }
             }
@@ -193,11 +194,11 @@ impl Problem {
                 for (index, coefficient) in constraint.coefficients.iter().enumerate() {
                     z_objective[index] += coefficient * BIG_M;
                 }
-                for var in all_vars.iter() {
-                    if var.type_var == TypeVariable::Excess {
-                        z_objective[var.id] -= BIG_M;
-                    }
-                }
+            }
+        }
+        for var in all_vars.iter() { // Adding penalties from Excess variables
+            if var.type_var == TypeVariable::Excess {
+                z_objective[var.id] = - BIG_M;
             }
         }
 
@@ -235,6 +236,7 @@ impl Problem {
                 let y_pivot = arg_min(&b_divided);
                 let pivot = constraints[y_pivot][x_pivot];
                 println!("pivot {:?}", pivot);
+                println!("b_divided {:?}", b_divided);
                 
                 // Starting the tableau update 
                 let z_objective_clone = z_objective.clone();
@@ -303,27 +305,37 @@ impl Problem {
     }
 }
 
+// These arg_max version might degenerate..
+// fn arg_max(vector: &Vec<f64>, all_vars: &Vec<Variable>) -> Option<Variable> {
+//     let mut max = 0.0;
+//     let mut index_max = 0;
+//     for i in 0..vector.len() {
+//         if vector[i] > max {
+//             index_max = i;
+//             max = vector[i];
+//         }
+//     }
+//     if max == 0.0 {
+//         return None
+//     }
+//     Some(all_vars[index_max])
+// }
+
+// These version won't degenerate : Bland's rule version
 fn arg_max(vector: &Vec<f64>, all_vars: &Vec<Variable>) -> Option<Variable> {
-    let mut max = 0.0;
-    let mut index_max = 0;
     for i in 0..vector.len() {
-        if vector[i] > max {
-            index_max = i;
-            max = vector[i];
+        if vector[i] > 0.0 {
+            return Some(all_vars[i])
         }
     }
-
-    if max == 0.0 {
-        return None
-    }
-    Some(all_vars[index_max])
+    None
 }
 
-fn arg_min(vector: &Vec<f64>) -> usize { // todo : no optimal solutions if no positive entry ?
+fn arg_min(vector: &Vec<f64>) -> usize {
     let mut min = 1_000_000_000_000.0; // todo use const
     let mut index_min = 0;
     for i in 0..vector.len() {
-        if vector[i] < min && vector[i] > 0.0 {
+        if vector[i] < min && vector[i] >= 0.0 {
             index_min = i;
             min = vector[i];
         }
@@ -334,17 +346,28 @@ fn arg_min(vector: &Vec<f64>) -> usize { // todo : no optimal solutions if no po
 // TODO add timer 
 fn main() -> Result<(), std::io::Error> { // todo add proper Result
 
-    let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![10.0, 11.0], b: 10700.0};
-    let c2 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![1.0, 1.0], b: 1000.0};
-    let c3 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 0.0], b: 700.0};
+    let c1 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![2.0, 4.0], b: 4.0};
+    let c2 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![1.0, 7.0], b: 7.0};
 
     let mut problem = Problem {
         optimization: Optimization::Minimization,
-        objective_coefficients: vec![56.0, 42.0],
-        constraints: vec![c1, c2, c3]
+        objective_coefficients: vec![1.0, 1.0],
+        constraints: vec![c1, c2]
     };
 
     let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+
+    // let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![2.0, 1.0], b: 8.0};
+    // let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 2.0], b: 7.0};
+    // let c3 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![0.0, 1.0], b: 3.0};
+
+    // let mut problem = Problem {
+    //     optimization: Optimization::Maximization,
+    //     objective_coefficients: vec![4.0, 5.0],
+    //     constraints: vec![c1, c2, c3]
+    // };
+
+    // let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
 
     Ok(())
 }
@@ -355,7 +378,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn maxi_full_inf_positive_b_solution_exists() {
+    fn maxi_full_inf_positive_b_solution_exists_1() {
         let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![2.0, 1.0], b: 8.0};
         let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 2.0], b: 7.0};
         let c3 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![0.0, 1.0], b: 3.0};
@@ -374,6 +397,31 @@ mod tests {
                 Variable{type_var: TypeVariable::Objective, id: 1},
             ],
             variables_values: vec![3.0, 2.0]
+        };
+        assert_eq!(target, solution);
+    }
+
+    #[test]
+    fn maxi_full_inf_positive_b_solution_exists_2() {
+        let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![2.0, 3.0, 0.0], b: 8.0};
+        let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![0.0, 2.0, 5.0], b: 10.0};
+        let c3 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![3.0, 2.0, 4.0], b: 15.0};
+    
+        let mut problem = Problem {
+            optimization: Optimization::Maximization,
+            objective_coefficients: vec![3.0, 5.0, 4.0],
+            constraints: vec![c1, c2, c3]
+        };
+
+        let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+        let target = Solution {
+            objective: 765.0 / 41.0,
+            variables: vec![
+                Variable{type_var: TypeVariable::Objective, id: 0},
+                Variable{type_var: TypeVariable::Objective, id: 1},
+                Variable{type_var: TypeVariable::Objective, id: 2},
+            ],
+            variables_values: vec![89.0 / 41.0, 50.0 / 41.0, 62.0 / 41.0]
         };
         assert_eq!(target, solution);
     }
@@ -398,6 +446,29 @@ mod tests {
                 Variable{type_var: TypeVariable::Objective, id: 1},
             ],
             variables_values: vec![300.0, 700.0]
+        };
+        assert_eq!(target, solution);
+    }
+
+    #[test]
+    fn mini_full_sup_positive_b_solution_exists_degeneracy() {
+        let c1 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![2.0, 4.0], b: 4.0};
+        let c2 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![1.0, 7.0], b: 7.0};
+    
+        let mut problem = Problem {
+            optimization: Optimization::Minimization,
+            objective_coefficients: vec![1.0, 1.0],
+            constraints: vec![c1, c2]
+        };
+
+        let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+        let target = Solution {
+            objective: 1.0,
+            variables: vec![
+                Variable{type_var: TypeVariable::Objective, id: 0},
+                Variable{type_var: TypeVariable::Objective, id: 1},
+            ],
+            variables_values: vec![0.0, 1.0]
         };
         assert_eq!(target, solution);
     }
