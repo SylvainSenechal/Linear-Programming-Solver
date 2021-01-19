@@ -1,9 +1,8 @@
 use std::fmt;
 const BIG_M: f64 = 1_000_000_000.0; // We are using simplex with BigM method (used when canonical base is not a bounded base)
+const MIN_RATIO: f64 = 1_000_000_000_000.0; // Leaving variable ratio should be inferior to this
 const MAX_ITERATION: i32 = 15; // Avoiding Hell 
 const EPSILON: f64 = 0.0001; // Comparing the value of 2 variables (we lose precision even with f64)
-
-// TODO : bounded / inbounded, tests  
 
 #[derive(Debug)]
 enum Optimization {
@@ -33,7 +32,7 @@ struct Problem {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-enum TypeVariable { // todo definir l'id directement ici : Objective(id)
+enum TypeVariable {
     Objective,
     Slack,
     Excess,
@@ -45,7 +44,6 @@ struct Variable {
     type_var: TypeVariable,
     id: usize, // reference variable among all type of var
     // todo ajouter un vrai nom ?
-    // todo incorporer valeur dedans direction, initialser à None puis en résultat à Some(f64) ?
 }
 
 #[derive(Debug, PartialEq)]
@@ -134,7 +132,7 @@ impl Problem {
         }
 
         for i in 0..nb_vars {
-            all_vars.push(Variable{type_var: TypeVariable::Objective, id: i}) // todo deal with id_constraint useless here
+            all_vars.push(Variable{type_var: TypeVariable::Objective, id: i})
         }
 
         let mut current_id_var = nb_vars; // Unique reference to any var
@@ -255,7 +253,7 @@ impl Problem {
         let solution = 'outer: loop {
             println!("\nCURRENT ITERATION {:?}", current_iteration);
             if current_iteration == MAX_ITERATION {
-                break Solution{state: StateSolution::MaxIterationReached, objective: 0.0, variables: vec![], variables_values: vec![]} // todo break with max iteration reach (neither unbound nor unfeasible)
+                break Solution{state: StateSolution::MaxIterationReached, objective: 0.0, variables: vec![], variables_values: vec![]}
             }
             current_iteration += 1;
 
@@ -263,12 +261,13 @@ impl Problem {
                 let x_pivot = entering_base.id;
                 let b_divided: Vec<f64> = b_vector.iter().enumerate()
                     .map(|(index, x)| {
-                        match constraints[index][x_pivot] { // todo par forcement besoin de faire cette verif a ce moment pour perfs
-                            0.0 => - 1.0,
+                        match constraints[index][x_pivot] {
+                            0.0 => - 1.0, // discard division by 0
                             val => x / val
                         }
                     }).collect();
-                let mut y_pivot = 0;
+                    
+                let y_pivot: usize;
                 match arg_min(&b_divided) {
                     Some(y) => y_pivot = y,
                     None => break Solution{state: StateSolution::Unbounded, objective: 0.0, variables: vec![], variables_values: vec![]}
@@ -316,7 +315,7 @@ impl Problem {
                 println!("NEW constraints {:?}", constraints);
             } else {
                 for (index_base, base) in x_base.iter().enumerate() { // If we couldn't get rid of positive artificial variable in the base, problem is unfeasible
-                    if (base.type_var == TypeVariable::Artificial && b_vector[index_base] > 0.0) {
+                    if base.type_var == TypeVariable::Artificial && b_vector[index_base] > 0.0 {
                         break 'outer Solution{state: StateSolution::Unfeasible, objective: 0.0, variables: vec![], variables_values: vec![]} 
                     }
                 }
@@ -379,7 +378,7 @@ fn arg_max(vector: &Vec<f64>, all_vars: &Vec<Variable>) -> Option<Variable> {
 }
 
 fn arg_min(vector: &Vec<f64>) -> Option<usize> {
-    let mut min = 1_000_000_000_000.0; // todo use const
+    let mut min = MIN_RATIO;
     let mut index_min = 0;
     for i in 0..vector.len() {
         if vector[i] < min && vector[i] >= 0.0 {
@@ -388,7 +387,7 @@ fn arg_min(vector: &Vec<f64>) -> Option<usize> {
         }
     }
     match min {
-        1_000_000_000_000.0 => None,
+        MIN_RATIO => None,
         _ => Some(index_min)
     }
 }
@@ -406,7 +405,7 @@ fn main() -> Result<(), std::io::Error> { // todo add proper Result
         constraints: vec![c1, c2, c3]
     };
 
-    let solution = problem.solve(); // todo gerer correctement probleme sans solution
+    let solution = problem.solve();
     println!("{}", solution);
 
     Ok(())
@@ -430,7 +429,7 @@ mod tests {
             constraints: vec![c1, c2, c3]
         };
 
-        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let solution = problem.solve();
         let target = Solution {
             state: StateSolution::Feasible,
             objective: 22.0,
@@ -455,7 +454,7 @@ mod tests {
             constraints: vec![c1, c2, c3]
         };
 
-        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let solution = problem.solve();
         let target = Solution {
             state: StateSolution::Feasible,
             objective: 765.0 / 41.0,
@@ -481,7 +480,7 @@ mod tests {
             constraints: vec![c1, c2, c3]
         };
 
-        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let solution = problem.solve();
         let target = Solution {
             state: StateSolution::Feasible,
             objective: 46200.0,
@@ -505,7 +504,7 @@ mod tests {
             constraints: vec![c1, c2]
         };
 
-        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let solution = problem.solve();
         let target = Solution {
             state: StateSolution::Feasible,
             objective: 1.0,
@@ -529,7 +528,7 @@ mod tests {
             constraints: vec![c1, c2]
         };
 
-        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let solution = problem.solve();
         let target = Solution {
             state: StateSolution::Feasible,
             objective: 18.0,
@@ -555,7 +554,7 @@ mod tests {
             constraints: vec![c1, c2, c3, c4]
         };
 
-        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let solution = problem.solve();
         let target = Solution {
             state: StateSolution::Feasible,
             objective: 30750.0,
@@ -581,7 +580,7 @@ mod tests {
             constraints: vec![c1, c2, c3]
         };
     
-        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let solution = problem.solve();
         let target = Solution {
             state: StateSolution::Unbounded,
             objective: 0.0,
@@ -602,7 +601,7 @@ mod tests {
             constraints: vec![c1, c2]
         };
     
-        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let solution = problem.solve();
         let target = Solution {
             state: StateSolution::Unfeasible,
             objective: 0.0,
@@ -623,7 +622,7 @@ mod tests {
             constraints: vec![c1, c2]
         };
     
-        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let solution = problem.solve();
         let target = Solution {
             state: StateSolution::Unfeasible,
             objective: 0.0,
