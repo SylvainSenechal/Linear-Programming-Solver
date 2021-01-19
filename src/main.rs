@@ -180,7 +180,7 @@ impl Problem {
                 }
             }
         }
-        println!("{:?}", ref_var_id);
+
         for _ in 0..(all_vars.len() - nb_vars) { // Filling the end of z_objective withs zeros representing the non Objective variable
             z_objective.push(0.0);
         }
@@ -237,6 +237,7 @@ impl Problem {
         }
 
         println!("all_vars    : {:?}", all_vars);
+        println!("objective   : {:?}", objective);
         println!("z_objective : {:?}", z_objective);
         println!("x_base      : {:?}", x_base);
         println!("b_vector    : {:?}", b_vector);
@@ -251,7 +252,7 @@ impl Problem {
 
         let mut current_iteration = 0;
 
-        let solution = loop {
+        let solution = 'outer: loop {
             println!("\nCURRENT ITERATION {:?}", current_iteration);
             if current_iteration == MAX_ITERATION {
                 break Solution{state: StateSolution::MaxIterationReached, objective: 0.0, variables: vec![], variables_values: vec![]} // todo break with max iteration reach (neither unbound nor unfeasible)
@@ -314,6 +315,11 @@ impl Problem {
                 println!("NEW x_base      {:?}", x_base);
                 println!("NEW constraints {:?}", constraints);
             } else {
+                for (index_base, base) in x_base.iter().enumerate() { // If we couldn't get rid of positive artificial variable in the base, problem is unfeasible
+                    if (base.type_var == TypeVariable::Artificial && b_vector[index_base] > 0.0) {
+                        break 'outer Solution{state: StateSolution::Unfeasible, objective: 0.0, variables: vec![], variables_values: vec![]} 
+                    }
+                }
                 println!("Simplex finished with success");
                 let objective = match self.optimization {
                     Optimization::Maximization => - *objective,
@@ -406,7 +412,8 @@ fn main() -> Result<(), std::io::Error> { // todo add proper Result
     Ok(())
 }
 
-// todo : retravailler l'ordre des variables pour la comparaison
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,6 +584,48 @@ mod tests {
         let solution = problem.solve(); // todo gerer correctement probleme sans solution
         let target = Solution {
             state: StateSolution::Unbounded,
+            objective: 0.0,
+            variables: vec![],
+            variables_values: vec![]
+        };
+        assert_eq!(target, solution);
+    }
+
+    #[test]
+    fn maxi_mixed_infsup_positive_b_infeasible() {
+        let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 1.0], b: 5.0};
+        let c2 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![0.0, 1.0], b: 8.0};
+    
+        let mut problem = Problem {
+            optimization: Optimization::Maximization,
+            objective_coefficients: vec![6.0, 4.0],
+            constraints: vec![c1, c2]
+        };
+    
+        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let target = Solution {
+            state: StateSolution::Unfeasible,
+            objective: 0.0,
+            variables: vec![],
+            variables_values: vec![]
+        };
+        assert_eq!(target, solution);
+    }
+
+    #[test]
+    fn maxi_full_inf_positive_b_infeasible() {
+        let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 1.0], b: 3.0};
+        let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![- 1.0, 3.0], b: - 4.0};
+    
+        let mut problem = Problem {
+            optimization: Optimization::Maximization,
+            objective_coefficients: vec![1.0, - 1.0],
+            constraints: vec![c1, c2]
+        };
+    
+        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let target = Solution {
+            state: StateSolution::Unfeasible,
             objective: 0.0,
             variables: vec![],
             variables_values: vec![]
