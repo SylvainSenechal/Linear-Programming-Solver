@@ -1,9 +1,9 @@
 use std::fmt;
-const BIG_M: f64 = 1_000_000_000.0; // We are using simplex with BigM method (used when canonical base is not a feasible base)
+const BIG_M: f64 = 1_000_000_000.0; // We are using simplex with BigM method (used when canonical base is not a bounded base)
 const MAX_ITERATION: i32 = 15; // Avoiding Hell 
 const EPSILON: f64 = 0.0001; // Comparing the value of 2 variables (we lose precision even with f64)
 
-// TODO : unbounded / infeasible, tests  
+// TODO : bounded / inbounded, tests  
 
 #[derive(Debug)]
 enum Optimization {
@@ -48,8 +48,17 @@ struct Variable {
     // todo incorporer valeur dedans direction, initialser à None puis en résultat à Some(f64) ?
 }
 
+#[derive(Debug, PartialEq)]
+enum StateSolution {
+    Feasible,
+    Unfeasible,
+    Unbounded,
+    MaxIterationReached
+}
+
 #[derive(Debug)]
 struct Solution {
+    state: StateSolution,
     objective: f64,
     variables: Vec<Variable>,
     variables_values: Vec<f64>
@@ -57,17 +66,21 @@ struct Solution {
 
 impl PartialEq for Solution {
     fn eq(&self, other: &Self) -> bool {
-        if (self.objective - other.objective).abs() > EPSILON { // Objectives should be assigned very close values
+        if self.state != other.state {
             return false
-        }
-        for (variable, value) in self.variables.iter().zip(self.variables_values.iter()) {           
-            let index_var = other.variables.iter().position(|x| x == variable);
-            if let Some(id) = index_var {
-                if (other.variables_values[id] - value).abs() > EPSILON { // 2 identicals variables should be assigned very close values
+        } else {
+            if (self.objective - other.objective).abs() > EPSILON { // Objectives should be assigned very close values
+                return false
+            }
+            for (variable, value) in self.variables.iter().zip(self.variables_values.iter()) {           
+                let index_var = other.variables.iter().position(|x| x == variable);
+                if let Some(id) = index_var {
+                    if (other.variables_values[id] - value).abs() > EPSILON { // 2 identicals variables should be assigned very close values
+                        return false
+                    }
+                } else { // Variable in one solution needs to be found in the other
                     return false
                 }
-            } else { // Variable in one solution needs to be found in the other
-                return false
             }
         }
         true
@@ -76,19 +89,27 @@ impl PartialEq for Solution {
 
 impl fmt::Display for Solution {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Solution :\n")?;
-        for (index, var) in self.variables.iter().enumerate() {
-            if var.type_var == TypeVariable::Objective {
-                write!(f, "Var x{} = {}\n", var.id, self.variables_values[index])?;
+        match self.state {
+            StateSolution::Unfeasible => write!(f, "This problem was found to be unfeasible")?,
+            StateSolution::Unbounded => write!(f, "This problem was found to be unbounded")?,
+            StateSolution::MaxIterationReached => write!(f, "Couldn't find a solution within max iterations = {} allowed", MAX_ITERATION)?,
+            StateSolution::Feasible => {
+                write!(f, "Solution :\n")?;
+                for (index, var) in self.variables.iter().enumerate() {
+                    if var.type_var == TypeVariable::Objective {
+                        write!(f, "Var x{} = {}\n", var.id, self.variables_values[index])?;
+                    }
+                }
+                write!(f, "Objective value : {}", self.objective)?;
             }
         }
-        write!(f, "Objective value : {}", self.objective)?;
+
         Ok(())
     }
 }
 
 impl Problem {
-    fn solve(&mut self) -> Option<Solution> { // Split le debut de cette fonction dans une compile function ?
+    fn solve(&mut self) -> Solution { // Split le debut de cette fonction dans une compile function ?
         // Compiling problem steps :
         // #1 : If Problem is Min Z = f(x), transform to Max - Z
         // #2 : For each constraint, if b member is < 0, multiply the whole constraint by - 1
@@ -100,7 +121,7 @@ impl Problem {
 
         let mut z_objective: Vec<f64> = vec![]; // Objective as represented in the tableau (includes slack, excess, artifical var)
         let mut all_vars: Vec<Variable> = vec![]; // List of all the vars uses in simplex's tableau
-        let mut x_base: Vec<Variable> = vec![]; // Feasible base
+        let mut x_base: Vec<Variable> = vec![]; // bounded base
         let mut b_vector: Vec<f64> = vec![]; // Vector of all b member
         let mut constraints: Vec<Vec<f64>> = vec![]; // Simplex's tableau
 
@@ -134,7 +155,7 @@ impl Problem {
                 }
             }
 
-            // Building a feasible base and creating the differents variables used in the tableau cf #3
+            // Building a bounded base and creating the differents variables used in the tableau cf #3
             match constraint.inequality {
                 TypeInequality::Inf => {
                     x_base.push(Variable{type_var: TypeVariable::Slack, id: current_id_var});
@@ -225,7 +246,7 @@ impl Problem {
         solution
     }
 
-    fn simplex(&self, objective: &mut f64, all_vars: &Vec<Variable>, z_objective: &mut Vec<f64>, x_base: &mut Vec<Variable>, b_vector: &mut Vec<f64>, constraints: &mut Vec<Vec<f64>>) -> Option<Solution> {
+    fn simplex(&self, objective: &mut f64, all_vars: &Vec<Variable>, z_objective: &mut Vec<f64>, x_base: &mut Vec<Variable>, b_vector: &mut Vec<f64>, constraints: &mut Vec<Vec<f64>>) -> Solution {
         println!("\nSTARTING SIMPLEX...\n");
 
         let mut current_iteration = 0;
@@ -233,7 +254,7 @@ impl Problem {
         let solution = loop {
             println!("\nCURRENT ITERATION {:?}", current_iteration);
             if current_iteration == MAX_ITERATION {
-                break None
+                break Solution{state: StateSolution::MaxIterationReached, objective: 0.0, variables: vec![], variables_values: vec![]} // todo break with max iteration reach (neither unbound nor unfeasible)
             }
             current_iteration += 1;
 
@@ -246,9 +267,15 @@ impl Problem {
                             val => x / val
                         }
                     }).collect();
-                let y_pivot = arg_min(&b_divided);
+                let mut y_pivot = 0;
+                match arg_min(&b_divided) {
+                    Some(y) => y_pivot = y,
+                    None => break Solution{state: StateSolution::Unbounded, objective: 0.0, variables: vec![], variables_values: vec![]}
+                }
                 let pivot = constraints[y_pivot][x_pivot];
                 println!("pivot {:?}", pivot);
+                println!("x_pivot {:?}", x_pivot);
+                println!("y_pivot {:?}", y_pivot);
                 println!("b_divided {:?}", b_divided);
                 
                 // Starting the tableau update 
@@ -283,7 +310,6 @@ impl Problem {
                 x_base[y_pivot] = entering_base;
                 println!("New objective   {:?}", objective);
                 println!("NEW z_objective {:?}", z_objective);
-                println!("NEW z_objective {:?}", z_objective);
                 println!("NEW b_vector    {:?}", b_vector);
                 println!("NEW x_base      {:?}", x_base);
                 println!("NEW constraints {:?}", constraints);
@@ -293,25 +319,27 @@ impl Problem {
                     Optimization::Maximization => - *objective,
                     Optimization::Minimization => *objective
                 };
-                println!("Variable value :");
+                let nb_vars = self.objective_coefficients.len();
                 let mut variables_solution = vec![];
                 let mut variables_values = vec![];
-                for (index, base) in x_base.iter().enumerate() {
-                    let name_var = match base.type_var {
-                        TypeVariable::Objective => {
-                            variables_solution.push(*base);
-                            variables_values.push(b_vector[index]);
-                            'x'
-                        },
-                        TypeVariable::Slack => 's',
-                        TypeVariable::Excess => 'e',
-                        TypeVariable::Artificial => 'a' 
-                    };
+                for id in 0..nb_vars {
+                    let index_base = x_base.iter().position(|x| x.id == id);
+                    match index_base { // If we find objective variable in the current base, we get it's value from b_vector...
+                        Some(found_id) => {
+                            variables_solution.push(x_base[found_id]);
+                            variables_values.push(b_vector[found_id]);
+                        }
+                        None => { // ... if objective variable isn't found in the base, it means it's equal to 0
+                            variables_solution.push(all_vars[id]);
+                            variables_values.push(0.0);
+                        }
+                    }
                 }
-                let solution = Solution{objective: objective, variables: variables_solution, variables_values: variables_values};
+
+                let solution = Solution{state: StateSolution::Feasible, objective: objective, variables: variables_solution, variables_values: variables_values};
                 println!("{}", solution);
 
-                break Some(solution)
+                break solution
             }
         };
         solution 
@@ -328,10 +356,10 @@ impl Problem {
 //             max = vector[i];
 //         }
 //     }
-//     if max == 0.0 {
-//         return None
+//     match max {
+//         0.0 => None,
+//         _ => Some(all_vars[index_max])
 //     }
-//     Some(all_vars[index_max])
 // }
 
 // These version won't degenerate : Bland's rule version
@@ -344,7 +372,7 @@ fn arg_max(vector: &Vec<f64>, all_vars: &Vec<Variable>) -> Option<Variable> {
     None
 }
 
-fn arg_min(vector: &Vec<f64>) -> usize {
+fn arg_min(vector: &Vec<f64>) -> Option<usize> {
     let mut min = 1_000_000_000_000.0; // todo use const
     let mut index_min = 0;
     for i in 0..vector.len() {
@@ -353,34 +381,27 @@ fn arg_min(vector: &Vec<f64>) -> usize {
             min = vector[i];
         }
     }
-    index_min
+    match min {
+        1_000_000_000_000.0 => None,
+        _ => Some(index_min)
+    }
 }
 
 // TODO add timer 
 fn main() -> Result<(), std::io::Error> { // todo add proper Result
 
-    let c1 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![2.0, 4.0], b: 4.0};
-    let c2 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![1.0, 7.0], b: 7.0};
+    let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, - 2.0], b: 6.0};
+    let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 0.0], b: 10.0};
+    let c3 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![0.0, 1.0], b: 1.0};
 
     let mut problem = Problem {
-        optimization: Optimization::Minimization,
-        objective_coefficients: vec![1.0, 1.0],
-        constraints: vec![c1, c2]
+        optimization: Optimization::Maximization,
+        objective_coefficients: vec![3.0, 5.0],
+        constraints: vec![c1, c2, c3]
     };
 
-    let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
-
-    // let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![2.0, 1.0], b: 8.0};
-    // let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 2.0], b: 7.0};
-    // let c3 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![0.0, 1.0], b: 3.0};
-
-    // let mut problem = Problem {
-    //     optimization: Optimization::Maximization,
-    //     objective_coefficients: vec![4.0, 5.0],
-    //     constraints: vec![c1, c2, c3]
-    // };
-
-    // let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+    let solution = problem.solve(); // todo gerer correctement probleme sans solution
+    println!("{}", solution);
 
     Ok(())
 }
@@ -402,8 +423,9 @@ mod tests {
             constraints: vec![c1, c2, c3]
         };
 
-        let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+        let solution = problem.solve(); // todo gerer correctement probleme sans solution
         let target = Solution {
+            state: StateSolution::Feasible,
             objective: 22.0,
             variables: vec![
                 Variable{type_var: TypeVariable::Objective, id: 0},
@@ -426,8 +448,9 @@ mod tests {
             constraints: vec![c1, c2, c3]
         };
 
-        let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+        let solution = problem.solve(); // todo gerer correctement probleme sans solution
         let target = Solution {
+            state: StateSolution::Feasible,
             objective: 765.0 / 41.0,
             variables: vec![
                 Variable{type_var: TypeVariable::Objective, id: 0},
@@ -451,8 +474,9 @@ mod tests {
             constraints: vec![c1, c2, c3]
         };
 
-        let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+        let solution = problem.solve(); // todo gerer correctement probleme sans solution
         let target = Solution {
+            state: StateSolution::Feasible,
             objective: 46200.0,
             variables: vec![
                 Variable{type_var: TypeVariable::Objective, id: 0},
@@ -474,14 +498,88 @@ mod tests {
             constraints: vec![c1, c2]
         };
 
-        let solution = problem.solve().expect("Didn't find any solution"); // todo gerer correctement probleme sans solution
+        let solution = problem.solve(); // todo gerer correctement probleme sans solution
         let target = Solution {
+            state: StateSolution::Feasible,
             objective: 1.0,
             variables: vec![
                 Variable{type_var: TypeVariable::Objective, id: 0},
                 Variable{type_var: TypeVariable::Objective, id: 1},
             ],
             variables_values: vec![0.0, 1.0]
+        };
+        assert_eq!(target, solution);
+    }
+
+    #[test]
+    fn maxi_full_inf_positive_b_solution_exists_degeneracy_tie_basis() {
+        let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 4.0], b: 8.0};
+        let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 2.0], b: 4.0};
+    
+        let mut problem = Problem {
+            optimization: Optimization::Maximization,
+            objective_coefficients: vec![3.0, 9.0],
+            constraints: vec![c1, c2]
+        };
+
+        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let target = Solution {
+            state: StateSolution::Feasible,
+            objective: 18.0,
+            variables: vec![
+                Variable{type_var: TypeVariable::Objective, id: 0},
+                Variable{type_var: TypeVariable::Objective, id: 1},
+            ],
+            variables_values: vec![0.0, 2.0]
+        };
+        assert_eq!(target, solution);
+    }
+
+    #[test]
+    fn maxi_mixed_infsup_positive_b_solution_exists_degeneracy_tie_artifical() {
+        let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 2.0, 0.0], b: 70.0};
+        let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![2.0, 3.0, - 1.0], b: 100.0};
+        let c3 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![1.0, 0.0, 0.0], b: 20.0};
+        let c4 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![0.0, 1.0, 0.0], b: 25.0};
+    
+        let mut problem = Problem {
+            optimization: Optimization::Maximization,
+            objective_coefficients: vec![750.0, 900.0, - 450.0],
+            constraints: vec![c1, c2, c3, c4]
+        };
+
+        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let target = Solution {
+            state: StateSolution::Feasible,
+            objective: 30750.0,
+            variables: vec![
+                Variable{type_var: TypeVariable::Objective, id: 0},
+                Variable{type_var: TypeVariable::Objective, id: 1},
+                Variable{type_var: TypeVariable::Objective, id: 2},
+            ],
+            variables_values: vec![20.0, 25.0, 15.0]
+        };
+        assert_eq!(target, solution);
+    }
+
+    #[test]
+    fn maxi_mixed_infsup_positive_b_unbouded() {
+        let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, - 2.0], b: 6.0};
+        let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 0.0], b: 10.0};
+        let c3 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![0.0, 1.0], b: 1.0};
+    
+        let mut problem = Problem {
+            optimization: Optimization::Maximization,
+            objective_coefficients: vec![3.0, 5.0],
+            constraints: vec![c1, c2, c3]
+        };
+    
+        let solution = problem.solve(); // todo gerer correctement probleme sans solution
+        let target = Solution {
+            state: StateSolution::Unbounded,
+            objective: 0.0,
+            variables: vec![],
+            variables_values: vec![]
         };
         assert_eq!(target, solution);
     }
