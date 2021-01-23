@@ -62,3 +62,4 @@ The bigM method is used.
 - [ ] TODO : Add Integer & Binary variables solved with Gomory's Cuts
 - [ ] TODO : Add Branch & Cut
 - [ ] TODO : Use Rayon crate on tableau iterations to multithread the solver
+- [ ] TODO : Read from MPS file
