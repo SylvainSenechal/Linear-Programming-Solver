@@ -1,5 +1,5 @@
 use std::fmt;
-const BIG_M: f64 = 1_000_000_000.0; // We are using simplex with BigM method (used when canonical base is not a bounded base)
+const BIG_M: f64 = 1_000_000_000.0; // We are using simplex with BigM method (used when canonical base is not a feasible base)
 const MIN_RATIO: f64 = 1_000_000_000_000.0; // Leaving variable ratio should be inferior to this
 const MAX_ITERATION: i32 = 15; // Avoiding Hell 
 const EPSILON: f64 = 0.0001; // Comparing the value of 2 variables (we lose precision even with f64)
@@ -66,19 +66,18 @@ impl PartialEq for Solution {
     fn eq(&self, other: &Self) -> bool {
         if self.state != other.state {
             return false
-        } else {
-            if (self.objective - other.objective).abs() > EPSILON { // Objectives should be assigned very close values
-                return false
-            }
-            for (variable, value) in self.variables.iter().zip(self.variables_values.iter()) {           
-                let index_var = other.variables.iter().position(|x| x == variable);
-                if let Some(id) = index_var {
-                    if (other.variables_values[id] - value).abs() > EPSILON { // 2 identicals variables should be assigned very close values
-                        return false
-                    }
-                } else { // Variable in one solution needs to be found in the other
+        }
+        if (self.objective - other.objective).abs() > EPSILON { // Objectives should be assigned very close values
+            return false
+        }
+        for (variable, value) in self.variables.iter().zip(self.variables_values.iter()) {           
+            let index_var = other.variables.iter().position(|x| x == variable);
+            if let Some(id) = index_var {
+                if (other.variables_values[id] - value).abs() > EPSILON { // 2 identicals variables should be assigned very close values
                     return false
                 }
+            } else { // Variable in one solution needs to be found in the other
+                return false
             }
         }
         true
@@ -119,7 +118,7 @@ impl Problem {
 
         let mut z_objective: Vec<f64> = vec![]; // Objective as represented in the tableau (includes slack, excess, artifical var)
         let mut all_vars: Vec<Variable> = vec![]; // List of all the vars uses in simplex's tableau
-        let mut x_base: Vec<Variable> = vec![]; // bounded base
+        let mut x_base: Vec<Variable> = vec![];
         let mut b_vector: Vec<f64> = vec![]; // Vector of all b member
         let mut constraints: Vec<Vec<f64>> = vec![]; // Simplex's tableau
 
@@ -148,7 +147,7 @@ impl Problem {
                 } else {
                     constraint.inequality = TypeInequality::Inf;
                 }
-                for val in &mut constraint.coefficients {
+                for val in constraint.coefficients.iter_mut() {
                     *val +=  - 1.0 * *val;
                 }
             }
@@ -342,7 +341,6 @@ impl Problem {
                 }
 
                 let solution = Solution{state: StateSolution::Feasible, objective: objective, variables: variables_solution, variables_values: variables_values};
-                println!("{}", solution);
 
                 break solution
             }
@@ -388,21 +386,22 @@ fn arg_min(vector: &Vec<f64>) -> Option<usize> {
     }
     match min {
         MIN_RATIO => None,
-        _ => Some(index_min)
+        _ => Some(index_min),
     }
 }
 
 // TODO add timer 
 fn main() -> Result<(), std::io::Error> { // todo add proper Result
 
-    let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, - 2.0], b: 6.0};
-    let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 0.0], b: 10.0};
-    let c3 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![0.0, 1.0], b: 1.0};
+    let c1 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![1.0, 2.0, 0.0], b: 70.0};
+    let c2 = Constraint{inequality: TypeInequality::Inf, coefficients: vec![2.0, 3.0, - 1.0], b: 100.0};
+    let c3 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![1.0, 0.0, 0.0], b: 20.0};
+    let c4 = Constraint{inequality: TypeInequality::Sup, coefficients: vec![0.0, 1.0, 0.0], b: 25.0};
 
     let mut problem = Problem {
         optimization: Optimization::Maximization,
-        objective_coefficients: vec![3.0, 5.0],
-        constraints: vec![c1, c2, c3]
+        objective_coefficients: vec![750.0, 900.0, - 450.0],
+        constraints: vec![c1, c2, c3, c4]
     };
 
     let solution = problem.solve();
