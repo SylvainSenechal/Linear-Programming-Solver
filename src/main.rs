@@ -413,6 +413,9 @@ fn main() -> Result<(), std::io::Error> { // todo add proper Result
 
 
 #[cfg(test)]
+mod solver_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
