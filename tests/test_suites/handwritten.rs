@@ -1,6 +1,6 @@
-use crate::{Optimization, Problem, TypeInequality};
+use linear_programming_solver::{Optimization, Problem, TypeInequality};
 
-use super::super::runner::{Expected, constraint, run_case};
+use super::super::{Expected, constraint, run_case};
 
 #[test]
 fn maxi_full_inf_positive_b_solution_exists_1() {

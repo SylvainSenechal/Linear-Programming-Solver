@@ -1,6 +1,7 @@
-use crate::{Optimization, Problem, TypeInequality};
+// Problem data and expected results: https://github.com/scipy/scipy/blob/e307925e358e8e05744106fd63f1b708babf07bb/scipy/optimize/tests/test_linprog.py
+use linear_programming_solver::{Optimization, Problem, TypeInequality};
 
-use super::super::runner::{Expected, constraint, run_case};
+use super::super::{Expected, constraint, run_case};
 
 #[test]
 fn inequality_constraints() {

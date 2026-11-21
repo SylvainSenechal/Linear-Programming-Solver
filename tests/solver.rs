@@ -1,12 +1,19 @@
-use crate::{Constraint, Problem, Solution, StateSolution, TypeInequality, TypeVariable};
+use linear_programming_solver::{
+    Constraint, Problem, Solution, StateSolution, TypeInequality, TypeVariable,
+};
 
-pub(super) enum Expected {
+mod test_suites {
+    mod handwritten;
+    mod scipy;
+}
+
+enum Expected {
     Optimal(f64),
     Infeasible,
     Unbounded,
 }
 
-pub(super) fn constraint(inequality: TypeInequality, coefficients: &[f64], b: f64) -> Constraint {
+fn constraint(inequality: TypeInequality, coefficients: &[f64], b: f64) -> Constraint {
     Constraint {
         inequality,
         coefficients: coefficients.to_vec(),
@@ -18,12 +25,12 @@ fn tolerance(scale: f64) -> f64 {
     1e-6 + 1e-7 * scale
 }
 
-pub(super) fn run_case(make_problem: impl Fn() -> Problem, expected: Expected) {
+fn run_case(make_problem: impl Fn() -> Problem, expected: Expected) {
     let solution = make_problem().solve();
     check_solution(&make_problem(), &solution, expected);
 }
 
-pub(super) fn check_solution(problem: &Problem, solution: &Solution, expected: Expected) {
+fn check_solution(problem: &Problem, solution: &Solution, expected: Expected) {
     let expected_state = match expected {
         Expected::Optimal(_) => StateSolution::Feasible,
         Expected::Infeasible => StateSolution::Unfeasible,
