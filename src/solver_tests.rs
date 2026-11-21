@@ -1,3 +1,6 @@
 mod runner;
-mod scipy;
-mod verifier_tests;
+
+mod test_suites {
+    mod handwritten;
+    mod scipy;
+}

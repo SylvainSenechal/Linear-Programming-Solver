@@ -1,14 +1,6 @@
-use crate::{Constraint, Optimization, Problem, TypeInequality};
+use crate::{Optimization, Problem, TypeInequality};
 
-use super::runner::{Expected, run_case};
-
-fn constraint(inequality: TypeInequality, coefficients: &[f64], b: f64) -> Constraint {
-    Constraint {
-        inequality,
-        coefficients: coefficients.to_vec(),
-        b,
-    }
-}
+use super::super::runner::{Expected, constraint, run_case};
 
 #[test]
 fn inequality_constraints() {

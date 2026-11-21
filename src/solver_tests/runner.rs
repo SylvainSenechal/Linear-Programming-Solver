@@ -1,9 +1,17 @@
-use crate::{Problem, Solution, StateSolution, TypeInequality, TypeVariable};
+use crate::{Constraint, Problem, Solution, StateSolution, TypeInequality, TypeVariable};
 
 pub(super) enum Expected {
     Optimal(f64),
     Infeasible,
     Unbounded,
+}
+
+pub(super) fn constraint(inequality: TypeInequality, coefficients: &[f64], b: f64) -> Constraint {
+    Constraint {
+        inequality,
+        coefficients: coefficients.to_vec(),
+        b,
+    }
 }
 
 fn tolerance(scale: f64) -> f64 {
