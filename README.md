@@ -4,12 +4,16 @@ Linear Programming Solver written with Rust
 # Example
 
 ```math
-Max Z = 750x0 + 900x1 - 450x2
-Subject To 
-1x0 + 2x1       <= 70
-2x0 + 3x1 - 1x2 <= 100
-1x0             >= 20
-      1x1       >=25
+\begin{gathered}
+\max Z = 750x_0 + 900x_1 - 450x_2 \\[6pt]
+\text{subject to}\qquad
+\begin{cases}
+x_0 + 2x_1 &\leq 70 \\
+2x_0 + 3x_1 - x_2 &\leq 100 \\
+x_0 &\geq 20 \\
+x_1 &\geq 25
+\end{cases}
+\end{gathered}
 ```
 
 ```rust
